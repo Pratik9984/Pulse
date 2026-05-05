@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Cipher Chat",
+  title: "Pulse",
   description: "Real-time messaging platform built for speed and reliability.",
   icons: {
     icon: "/Pulse.png",   // 👈 add this line
