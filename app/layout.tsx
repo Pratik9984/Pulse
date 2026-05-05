@@ -3,9 +3,9 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Pulse",
-  description: "Real-time messaging platform built for speed and reliability.",
+  description: "Keep your conversations flowing with real-time speed.",
   icons: {
-    icon: "/Pulse.png",   // 👈 add this line
+    icon: "/Pulse.png",   // 👈 Updated to use your new logo
   },
 };
 
