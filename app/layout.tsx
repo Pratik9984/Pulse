@@ -5,7 +5,7 @@ export const metadata: Metadata = {
   title: "Pulse",
   description: "Keep your conversations flowing with real-time speed.",
   icons: {
-    icon: "/Pulse.png",   // 👈 Updated to use your new logo
+    icon: "/Pulse.svg",   // 👈 Updated to use your new logo
   },
 };
 
