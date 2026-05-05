@@ -33,7 +33,7 @@ const errorMessage = (error: unknown) => error instanceof Error ? error.message 
 const API = process.env.NEXT_PUBLIC_API_URL || "https://pratik0165-cipherbackend.hf.space";
 const WS = process.env.NEXT_PUBLIC_WS_URL || API.replace(/^http/, "ws");
 
-export default function CipherChat() {
+export default function PulseChat() {
   // ─── State ──────────────────────────────────────────────────────────────────
   const [isMounted, setIsMounted] = useState(false);
   useEffect(() => setIsMounted(true), []);
@@ -43,7 +43,6 @@ export default function CipherChat() {
   const [token, setToken] = useState(() => (typeof window === "undefined" ? "" : localStorage.getItem("chat_token") || ""));
   const [currentUser, setCurrentUser] = useState(() => (typeof window === "undefined" ? "" : localStorage.getItem("chat_user") || ""));
   
-  // NEW: Profile state to hold display name and avatar URL
   const [profile, setProfile] = useState({ displayName: "", avatarUrl: "" });
   
   const [authLoading, setAuthLoading] = useState(false);
@@ -685,7 +684,7 @@ export default function CipherChat() {
 
   if (!isMounted) return (
     <div className="app" style={{ display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg)", width: "100vw", height: "100vh" }}>
-      <div className="spinner" style={{ width: 40, height: 40, border: "3px solid rgba(255,255,255,0.1)", borderTopColor: "var(--gold)" }}></div>
+      <div className="spinner" style={{ width: 40, height: 40, border: "3px solid rgba(255,255,255,0.1)", borderTopColor: "var(--primary)" }}></div>
     </div>
   );
 
@@ -699,19 +698,18 @@ export default function CipherChat() {
           <div className="auth-left">
             <div className="brand">
               <div className="brand-icon">
-                <svg width="22" height="22" viewBox="0 0 28 28" fill="none">
-                  <path d="M4 8C4 5.79 5.79 4 8 4H20C22.21 4 24 5.79 24 8V16C24 18.21 22.21 20 20 20H15L9 24V20H8C5.79 20 4 18.21 4 16V8Z" fill="currentColor" />
-                  <circle cx="10" cy="12" r="1.5" fill="rgba(0,0,0,0.45)" /><circle cx="14" cy="12" r="1.5" fill="rgba(0,0,0,0.45)" /><circle cx="18" cy="12" r="1.5" fill="rgba(0,0,0,0.45)" />
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
                 </svg>
               </div>
-              <span className="brand-name">Cipher</span>
+              <span className="brand-name">Pulse</span>
             </div>
             <div className="auth-hero">
-              <h1>Connect.<br />Fast.<br /><em>Simple.</em></h1>
-              <p>Real-time messaging platform built for speed and reliability.</p>
+              <h1>Connect.<br />Fast.<br /><em>Alive.</em></h1>
+              <p>Keep your conversations flowing with real-time speed.</p>
             </div>
             <div className="auth-pills">
-              <span className="a-pill a-pill--gold">⚡ Fast</span>
+              <span className="a-pill a-pill--primary">⚡ Fast</span>
               <span className="a-pill">💬 Real-time</span>
               <span className="a-pill">📱 Mobile-ready</span>
             </div>
@@ -889,7 +887,7 @@ export default function CipherChat() {
                       apiFetch("/groups", { method: "POST", body: JSON.stringify({ name: newGroupName.trim(), description: newGroupDesc, members }) })
                         .then(() => { setNewGroupName(""); setNewGroupDesc(""); setNewGroupMembers(""); setShowNewGroup(false); loadGroups(); });
                     }}
-                    className="sb-go-btn purple"
+                    className="sb-go-btn secondary"
                   >
                     Create group
                   </button>
@@ -903,7 +901,7 @@ export default function CipherChat() {
                       <span className="sb-item-name">{g.name}</span>
                       <span className="sb-item-status">{g.members.length} members</span>
                     </div>
-                    {unread[g.id] > 0 && <span className="unread unread--purple">{unread[g.id]}</span>}
+                    {unread[g.id] > 0 && <span className="unread unread--secondary">{unread[g.id]}</span>}
                   </button>
                 ))}
               </div>
@@ -916,7 +914,7 @@ export default function CipherChat() {
               <div className="empty-state">
                 <div className="empty-rings">
                   <div className="ring r1"></div><div className="ring r2"></div><div className="ring r3"></div>
-                  <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ position: "relative", zIndex: 1 }}><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
+                  <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ position: "relative", zIndex: 1 }}><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
                 </div>
                 <h3>No conversation open</h3>
                 <p>Select a contact or group from the sidebar to start messaging</p>
