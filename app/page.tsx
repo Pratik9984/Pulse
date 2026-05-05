@@ -30,7 +30,7 @@ type ApiOptions = RequestInit & { headers?: HeadersInit };
 
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : "Request failed";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "https://pratik0165-cipherbackend.hf.space/admin/files";
+const API = process.env.NEXT_PUBLIC_API_URL || "https://pratik0165-cipherbackend.hf.space";
 const WS = process.env.NEXT_PUBLIC_WS_URL || API.replace(/^http/, "ws");
 
 export default function CipherChat() {
@@ -42,10 +42,10 @@ export default function CipherChat() {
   const [otpSent, setOtpSent] = useState(false);
   const [token, setToken] = useState(() => (typeof window === "undefined" ? "" : localStorage.getItem("chat_token") || ""));
   const [currentUser, setCurrentUser] = useState(() => (typeof window === "undefined" ? "" : localStorage.getItem("chat_user") || ""));
-
+  
   // NEW: Profile state to hold display name and avatar URL
   const [profile, setProfile] = useState({ displayName: "", avatarUrl: "" });
-
+  
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState("");
   const isAuth = !!token;
@@ -389,13 +389,13 @@ export default function CipherChat() {
     const file = e.target.files?.[0];
     if (!file) return;
     setIsUploadingAvatar(true);
-    const form = new FormData();
+    const form = new FormData(); 
     form.append("file", file);
     try {
       const res = await fetch(`${API}/upload`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form });
       if (!res.ok) throw new Error("Upload failed");
       const data = await res.json();
-
+      
       // Update profile with new avatar URL
       await apiFetch("/profile/me", { method: "PATCH", body: JSON.stringify({ avatar_url: data.url }) });
       setProfile(prev => ({ ...prev, avatarUrl: data.url }));
@@ -599,7 +599,7 @@ export default function CipherChat() {
   const startCall = async (video = true) => {
     if (!activeChat || activeChat.type !== "user") return;
     const target = String(activeChat.id);
-
+    
     try {
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach(track => track.stop());
@@ -650,9 +650,9 @@ export default function CipherChat() {
 
       ws.send(JSON.stringify({ type: "call_answer", target_user: callPeer, sdp: answer }));
       setCallState("connected");
-    } catch (err: any) {
+    } catch (err: any) { 
       console.error("Accept call media failed:", err);
-      rejectCall();
+      rejectCall(); 
     }
   };
 
@@ -789,14 +789,14 @@ export default function CipherChat() {
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" /></svg> Edit Profile
               <svg className={`chevron ${showProfile ? "chevron--up" : ""}`} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6,9 12,15 18,9" /></svg>
             </div>
-
+            
             {/* NEW PROFILE DROP DOWN WITH UPLOAD */}
             {showProfile && (
               <div className="sb-profile-form drop">
                 <div className="avatar-edit-section">
-                  <input type="file" ref={avatarInputRef} accept="image/*" style={{ display: 'none' }} onChange={handleAvatarUpload} />
-                  <button
-                    onClick={() => avatarInputRef.current?.click()}
+                  <input type="file" ref={avatarInputRef} accept="image/*" style={{display: 'none'}} onChange={handleAvatarUpload} />
+                  <button 
+                    onClick={() => avatarInputRef.current?.click()} 
                     className="avatar-upload-btn"
                     disabled={isUploadingAvatar}
                   >
@@ -850,7 +850,7 @@ export default function CipherChat() {
                   <button key={c.phone_number} onClick={() => openChat({ type: "user", id: c.phone_number, name: c.nickname || c.display_name || c.phone_number })} className={`sb-item ${activeChat?.id === c.phone_number ? "sb-item--active" : ""}`}>
                     <div className="sb-av">
                       {c.avatar_url ? (
-                        <img src={c.avatar_url} alt="avatar" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                        <img src={c.avatar_url} alt="avatar" style={{width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover'}} />
                       ) : (
                         (c.nickname || c.display_name || c.phone_number)?.[0]?.toUpperCase() || "?"
                       )}
@@ -928,13 +928,13 @@ export default function CipherChat() {
                     <button className="mobile-back-btn" onClick={() => setActiveChat(null)}>
                       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6" /></svg>
                     </button>
-
+                    
                     {/* Header Avatar Fix */}
                     <div className={`hdr-av ${activeChat.type === "group" ? "hdr-av--group" : "hdr-av--dm"}`}>
                       {activeChat.type === "user" && contacts.find(c => c.phone_number === activeChat.id)?.avatar_url ? (
-                        <img src={contacts.find(c => c.phone_number === activeChat.id)!.avatar_url!} alt="avatar" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                         <img src={contacts.find(c => c.phone_number === activeChat.id)!.avatar_url!} alt="avatar" style={{width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover'}} />
                       ) : (
-                        activeChat.name?.[0]?.toUpperCase() || "?"
+                         activeChat.name?.[0]?.toUpperCase() || "?"
                       )}
                     </div>
 
