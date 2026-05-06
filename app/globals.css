@@ -7,6 +7,7 @@
   --surface-hover: #1a202c;
   --surface-border: #1e293b;
   --primary: #00e5ff;
+  --primary-rgb: 0, 229, 255;
   /* Neon Cyan/Teal */
   --primary-glow: rgba(0, 229, 255, 0.4);
   --secondary: #3b82f6;
@@ -58,8 +59,8 @@ input {
 }
 
 /* ==========================================================================
-   2. AUTHENTICATION SCREEN
-   ========================================================================== */
+     2. AUTHENTICATION SCREEN
+     ========================================================================== */
 .auth-screen {
   display: flex;
   width: 100%;
@@ -279,8 +280,8 @@ input {
 }
 
 /* ==========================================================================
-   3. APP SHELL & SIDEBAR
-   ========================================================================== */
+     3. APP SHELL & SIDEBAR
+     ========================================================================== */
 .shell {
   display: flex;
   width: 100%;
@@ -581,8 +582,8 @@ input {
 }
 
 /* ==========================================================================
-   4. CHAT MAIN AREA
-   ========================================================================== */
+     4. CHAT MAIN AREA
+     ========================================================================== */
 .chat {
   flex: 1;
   display: flex;
@@ -723,8 +724,8 @@ input {
 }
 
 /* ==========================================================================
-   5. MESSAGE LIST
-   ========================================================================== */
+     5. MESSAGE LIST
+     ========================================================================== */
 .msg-list {
   flex: 1;
   overflow-y: auto;
@@ -937,8 +938,8 @@ input {
 }
 
 /* ==========================================================================
-   6. TYPING & INPUT BAR
-   ========================================================================== */
+     6. TYPING & INPUT BAR
+     ========================================================================== */
 .typing-area {
   height: 24px;
   padding: 0 1.5rem;
@@ -1088,8 +1089,8 @@ input {
 }
 
 /* ==========================================================================
-   7. AVATAR UPLOAD
-   ========================================================================== */
+     7. AVATAR UPLOAD
+     ========================================================================== */
 .avatar-edit-section {
   margin-bottom: 1rem;
   text-align: center;
@@ -1120,8 +1121,8 @@ input {
 }
 
 /* ==========================================================================
-   8. OVERLAYS (WEBRTC CALLS & FILES)
-   ========================================================================== */
+     8. OVERLAYS (WEBRTC CALLS & FILES)
+     ========================================================================== */
 .call-overlay {
   position: fixed;
   top: 0;
@@ -1287,8 +1288,8 @@ input {
 }
 
 /* ==========================================================================
-   9. ANIMATIONS
-   ========================================================================== */
+     9. ANIMATIONS
+     ========================================================================== */
 @keyframes slideDown {
   from {
     opacity: 0;
@@ -1446,8 +1447,8 @@ input {
 }
 
 /* ==========================================================================
-   10. CALL HISTORY LOG (NEW)
-   ========================================================================== */
+     10. CALL HISTORY LOG (NEW)
+     ========================================================================== */
 .call-log-modal {
   background: var(--surface);
   border: 1px solid var(--surface-border);
@@ -1559,8 +1560,8 @@ input {
 }
 
 /* ==========================================================================
-   11. RESPONSIVE QUERIES (MOBILE)
-   ========================================================================== */
+     11. RESPONSIVE QUERIES (MOBILE)
+     ========================================================================== */
 @media (max-width: 768px) {
   html {
     font-size: 14px;
@@ -1672,4 +1673,529 @@ input {
   .bw {
     max-width: 90%;
   }
+}
+
+/* ==========================================================================
+     12. NEW CLASSES EXTRACTED FROM INLINE STYLES
+     ========================================================================== */
+
+/* Loading Screen */
+.loading-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  width: 100vw;
+  height: 100vh;
+}
+
+.loading-spinner-circle {
+  width: 40px;
+  height: 40px;
+  border: 3px solid rgba(255, 255, 255, 0.1);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+/* Utility Display/Inputs */
+.d-none {
+  display: none;
+}
+
+.d-block {
+  display: block;
+}
+
+.hidden-input {
+  display: none;
+}
+
+/* Images & Avatars */
+.img-cover {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.rounded-sq {
+  border-radius: 14px;
+}
+
+.rounded-circle {
+  border-radius: 50%;
+}
+
+/* Editor Profile Row */
+.avatar-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.avatar-edit-box {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+/* Layout utilities */
+.mw-0 {
+  min-width: 0;
+}
+
+.z-1-relative {
+  position: relative;
+  z-index: 1;
+}
+
+/* Sidebar items */
+.name-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.name-meta {
+  font-size: 0.68rem;
+  opacity: 0.45;
+  font-weight: 400;
+}
+
+/* Header specific */
+.cursor-pointer {
+  cursor: pointer;
+}
+
+.pointer-relative {
+  position: relative;
+}
+
+.default-relative {
+  position: relative;
+  cursor: default;
+}
+
+.hdr-av-overlay {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s;
+  font-size: 11px;
+  color: #fff;
+  font-weight: 600;
+}
+
+.hdr-av:hover .hdr-av-overlay {
+  opacity: 1 !important;
+}
+
+.name-row-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-pencil-nickname {
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  padding: 3px 5px;
+  cursor: pointer;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  transition: color 0.15s, background 0.15s;
+  flex-shrink: 0;
+}
+
+.btn-pencil-nickname.active {
+  background: rgba(var(--primary-rgb), 0.18);
+  color: var(--primary);
+}
+
+.hdr-meta-nickname {
+  font-size: 0.7rem;
+  opacity: 0.5;
+}
+
+/* Inline Nickname Edit Modal */
+.nickname-edit-panel {
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 10px 16px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.nickname-edit-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.nickname-edit-input {
+  flex: 1;
+  min-width: 140px;
+  margin: 0;
+  padding: 5px 10px;
+  font-size: 0.82rem;
+}
+
+.nickname-edit-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.btn-save-sm {
+  padding: 5px 12px;
+  font-size: 0.78rem;
+}
+
+.btn-clear-sm {
+  padding: 5px 12px;
+  font-size: 0.78rem;
+  background: rgba(255, 77, 79, 0.12);
+  color: #ff6b6b;
+  border: 1px solid rgba(255, 77, 79, 0.25);
+}
+
+.btn-close-sm {
+  padding: 5px 10px;
+  font-size: 0.78rem;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-muted);
+}
+
+/* Media Overrides */
+.msg-img-media {
+  max-width: 100%;
+  border-radius: 8px;
+}
+
+.msg-audio-media {
+  max-width: 100%;
+}
+
+.msg-video-media {
+  max-width: 100%;
+  border-radius: 8px;
+}
+
+.msg-pdf-media {
+  width: 100%;
+  min-height: 300px;
+  border: none;
+  border-radius: 8px;
+  background-color: white;
+}
+
+/* Contact Profile Viewer Overlay */
+.cp-backdrop {
+  backdrop-filter: blur(6px);
+}
+
+.cp-modal {
+  background: var(--bg);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 18px;
+  width: 320px;
+  max-width: 92vw;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  position: relative;
+}
+
+.cp-close-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  background: rgba(0, 0, 0, 0.4);
+  border: none;
+  border-radius: 50%;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #fff;
+  font-size: 14px;
+}
+
+.cp-hero {
+  background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.25), rgba(0, 0, 0, 0.2));
+  padding: 36px 20px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.cp-avatar {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: rgba(var(--primary-rgb), 0.25);
+  border: 3px solid rgba(var(--primary-rgb), 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 40px;
+  font-weight: 700;
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.cp-name-wrap {
+  text-align: center;
+}
+
+.cp-name {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-bottom: 2px;
+}
+
+.cp-sub {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.cp-badge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 20px;
+  padding: 3px 12px;
+  font-size: 0.78rem;
+}
+
+.cp-badge-online {
+  background: rgba(34, 197, 94, 0.15);
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  color: #4ade80;
+}
+
+.cp-badge-offline {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-muted);
+}
+
+.cp-badge-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.cp-badge-dot.online {
+  background: #4ade80;
+}
+
+.cp-badge-dot.offline {
+  background: #666;
+}
+
+.cp-body {
+  padding: 16px 20px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cp-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+
+.cp-row-between {
+  justify-content: space-between;
+}
+
+.cp-row-align {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cp-row-label {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  margin-bottom: 1px;
+}
+
+.cp-row-val {
+  font-size: 0.88rem;
+  color: var(--text-main);
+  font-weight: 500;
+}
+
+.cp-row-val.muted {
+  color: var(--text-muted);
+}
+
+.cp-edit-btn {
+  background: rgba(var(--primary-rgb), 0.15);
+  border: 1px solid rgba(var(--primary-rgb), 0.3);
+  border-radius: 7px;
+  padding: 4px 10px;
+  cursor: pointer;
+  color: var(--primary);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.cp-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.cp-action-btn {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 10px 8px;
+  cursor: pointer;
+  color: var(--text-main);
+  font-size: 0.78rem;
+  font-weight: 500;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.cp-action-btn.primary {
+  background: rgba(var(--primary-rgb), 0.12);
+  border: 1px solid rgba(var(--primary-rgb), 0.25);
+  color: var(--primary);
+}
+
+/* Text Utilities */
+.text-muted-sm {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin: 0 0 8px;
+  line-height: 1.4;
+}
+
+.text-muted-sm-margin {
+  margin: 4px 0 8px;
+}
+
+/* Call Log Specific Modal Rules */
+.cl-modal {
+  background: var(--bg);
+  padding: 20px;
+  border-radius: 12px;
+  width: 400px;
+  max-width: 90vw;
+  max-height: 80vh;
+  overflow-y: auto;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+
+.cl-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 10px;
+}
+
+.cl-title {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.cl-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 1.2rem;
+  padding: 5px;
+}
+
+.cl-empty {
+  color: var(--text-muted);
+  text-align: center;
+  padding: 40px 0;
+  font-style: italic;
+}
+
+.cl-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cl-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+}
+
+.cl-item-name {
+  display: block;
+  font-size: 1rem;
+  color: var(--text-main);
+  margin-bottom: 4px;
+}
+
+.cl-item-name.missed {
+  color: #ff4d4f;
+}
+
+.cl-item-meta {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.cl-item-dur {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.cl-item-dur.status {
+  text-transform: capitalize;
 }
