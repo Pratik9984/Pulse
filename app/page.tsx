@@ -28,6 +28,17 @@ type GroupedMessage = ({ type: "divider"; label: string } | ({ type: "msg" } & M
 type CallState = "idle" | "incoming" | "calling" | "connected";
 type ApiOptions = RequestInit & { headers?: HeadersInit };
 
+// NEW: Call Log Type
+type CallLogEntry = {
+  id: string;
+  peer: string;
+  direction: "incoming" | "outgoing";
+  media: "audio" | "video";
+  status: "completed" | "missed" | "rejected";
+  timestamp: string;
+  duration: number; // in seconds
+};
+
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : "Request failed";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "https://pratik0165-cipherbackend.hf.space";
@@ -42,9 +53,9 @@ export default function PulseChat() {
   const [otpSent, setOtpSent] = useState(false);
   const [token, setToken] = useState(() => (typeof window === "undefined" ? "" : localStorage.getItem("chat_token") || ""));
   const [currentUser, setCurrentUser] = useState(() => (typeof window === "undefined" ? "" : localStorage.getItem("chat_user") || ""));
-  
+
   const [profile, setProfile] = useState({ displayName: "", avatarUrl: "" });
-  
+
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState("");
   const isAuth = !!token;
@@ -70,6 +81,7 @@ export default function PulseChat() {
 
   const [showEmojis, setShowEmojis] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [showCallLogUI, setShowCallLogUI] = useState(false); // NEW: Call Log UI Toggle
   const [showNewGroup, setShowNewGroup] = useState(false);
   const [showNewContact, setShowNewContact] = useState(false);
   const [newContactPhone, setNewContactPhone] = useState("");
@@ -84,6 +96,16 @@ export default function PulseChat() {
   const [isVideoCall, setIsVideoCall] = useState(false);
   const [callPeer, setCallPeer] = useState<string | null>(null);
   const [viewFile, setViewFile] = useState<{ url: string; type: string } | null>(null);
+
+  // NEW: Call Log State & Persistence
+  const [callLogs, setCallLogs] = useState<CallLogEntry[]>([]);
+
+  useEffect(() => {
+    if (currentUser) {
+      const savedLogs = localStorage.getItem(`call_logs_${currentUser}`);
+      if (savedLogs) setCallLogs(JSON.parse(savedLogs));
+    }
+  }, [currentUser]);
 
   // ─── Refs ───────────────────────────────────────────────────────────────────
   const msgListRef = useRef<HTMLDivElement | null>(null);
@@ -101,6 +123,16 @@ export default function PulseChat() {
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
   const messagesCache = useRef<Record<string, Message[]>>({});
+
+  // NEW: WebRTC Tracking Refs
+  const callStateRef = useRef<CallState>("idle");
+  const callStartTimeRef = useRef<number | null>(null);
+  const callDirectionRef = useRef<"incoming" | "outgoing" | null>(null);
+
+  const updateCallState = useCallback((newState: CallState) => {
+    setCallState(newState);
+    callStateRef.current = newState;
+  }, []);
 
   const emojis = ["😀", "😂", "🥰", "😎", "🤔", "😭", "😡", "👍", "❤️", "🔥", "🎉", "🚀", "✅", "💯", "🙏", "🫡", "😤", "🤩", "💀", "🫶"];
   const PAGE = 50;
@@ -174,7 +206,32 @@ export default function PulseChat() {
     setTimeout(() => n.close(), 5000);
   };
 
-  const endCall = useCallback((sendSignal = true) => {
+  const endCall = useCallback((sendSignal = true, explicitStatus?: "completed" | "missed" | "rejected") => {
+    // 1. Process Call Log
+    if (callPeer && callDirectionRef.current) {
+      const duration = callStartTimeRef.current && callStateRef.current === "connected"
+        ? Math.floor((Date.now() - callStartTimeRef.current) / 1000)
+        : 0;
+      const finalStatus = explicitStatus || (callStateRef.current === "connected" ? "completed" : "missed");
+
+      const newLog: CallLogEntry = {
+        id: Date.now().toString() + Math.random().toString(),
+        peer: callPeer,
+        direction: callDirectionRef.current,
+        media: isVideoCall ? "video" : "audio",
+        status: finalStatus,
+        timestamp: new Date().toISOString(),
+        duration
+      };
+
+      setCallLogs(prev => {
+        const next = [newLog, ...prev];
+        if (currentUser) localStorage.setItem(`call_logs_${currentUser}`, JSON.stringify(next));
+        return next;
+      });
+    }
+
+    // 2. Terminate Call
     if (sendSignal && callPeer && wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "call_end", target_user: callPeer }));
     }
@@ -187,9 +244,13 @@ export default function PulseChat() {
     pendingRemoteDescriptionRef.current = null;
     localStreamRef.current = null;
     remoteStreamRef.current = null;
-    setCallState("idle");
+    updateCallState("idle");
     setCallPeer(null);
-  }, [callPeer]);
+
+    // 3. Clear Tracking Refs
+    callStartTimeRef.current = null;
+    callDirectionRef.current = null;
+  }, [callPeer, isVideoCall, updateCallState, currentUser]);
 
   const initWSRef = useRef<(() => void) | null>(null);
 
@@ -310,13 +371,15 @@ export default function PulseChat() {
         case "call_offer":
           setCallPeer(String(data.user || ""));
           setIsVideoCall(Boolean(data.isVideo));
-          setCallState("incoming");
+          updateCallState("incoming");
+          callDirectionRef.current = "incoming"; // Track Direction
           pendingRemoteDescriptionRef.current = data.sdp as RTCSessionDescriptionInit;
           break;
         case "call_answer":
           if (peerConnectionRef.current) {
             await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.sdp as RTCSessionDescriptionInit));
-            setCallState("connected");
+            updateCallState("connected");
+            callStartTimeRef.current = Date.now(); // Start Timer
           }
           break;
         case "ice_candidate":
@@ -325,12 +388,14 @@ export default function PulseChat() {
           }
           break;
         case "call_end":
-        case "call_reject":
           endCall(false);
+          break;
+        case "call_reject":
+          endCall(false, "rejected");
           break;
       }
     };
-  }, [token, currentUser, endCall]);
+  }, [token, currentUser, endCall, updateCallState]);
 
   useEffect(() => {
     initWSRef.current = initWS;
@@ -388,13 +453,13 @@ export default function PulseChat() {
     const file = e.target.files?.[0];
     if (!file) return;
     setIsUploadingAvatar(true);
-    const form = new FormData(); 
+    const form = new FormData();
     form.append("file", file);
     try {
       const res = await fetch(`${API}/upload`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form });
       if (!res.ok) throw new Error("Upload failed");
       const data = await res.json();
-      
+
       // Update profile with new avatar URL
       await apiFetch("/profile/me", { method: "PATCH", body: JSON.stringify({ avatar_url: data.url }) });
       setProfile(prev => ({ ...prev, avatarUrl: data.url }));
@@ -598,15 +663,16 @@ export default function PulseChat() {
   const startCall = async (video = true) => {
     if (!activeChat || activeChat.type !== "user") return;
     const target = String(activeChat.id);
-    
+
     try {
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach(track => track.stop());
       }
 
       setIsVideoCall(video);
-      setCallState("calling");
+      updateCallState("calling");
       setCallPeer(target);
+      callDirectionRef.current = "outgoing"; // Track Direction
 
       localStreamRef.current = await navigator.mediaDevices.getUserMedia({ video, audio: true });
       if (localVideoRef.current) localVideoRef.current.srcObject = localStreamRef.current;
@@ -648,10 +714,12 @@ export default function PulseChat() {
       await peerConnection.setLocalDescription(answer);
 
       ws.send(JSON.stringify({ type: "call_answer", target_user: callPeer, sdp: answer }));
-      setCallState("connected");
-    } catch (err: any) { 
+
+      updateCallState("connected");
+      callStartTimeRef.current = Date.now(); // Start Timer
+    } catch (err: any) {
       console.error("Accept call media failed:", err);
-      rejectCall(); 
+      rejectCall();
     }
   };
 
@@ -659,7 +727,7 @@ export default function PulseChat() {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "call_reject", target_user: callPeer }));
     }
-    endCall(false);
+    endCall(false, "rejected");
   };
 
   // ─── Formatters ─────────────────────────────────────────────────────────────
@@ -699,7 +767,7 @@ export default function PulseChat() {
             <div className="brand">
               <div className="brand-icon">
                 <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+                  <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
                 </svg>
               </div>
               <span className="brand-name">Pulse</span>
@@ -787,14 +855,14 @@ export default function PulseChat() {
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" /></svg> Edit Profile
               <svg className={`chevron ${showProfile ? "chevron--up" : ""}`} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6,9 12,15 18,9" /></svg>
             </div>
-            
+
             {/* NEW PROFILE DROP DOWN WITH UPLOAD */}
             {showProfile && (
               <div className="sb-profile-form drop">
                 <div className="avatar-edit-section">
-                  <input type="file" ref={avatarInputRef} accept="image/*" style={{display: 'none'}} onChange={handleAvatarUpload} />
-                  <button 
-                    onClick={() => avatarInputRef.current?.click()} 
+                  <input type="file" ref={avatarInputRef} accept="image/*" style={{ display: 'none' }} onChange={handleAvatarUpload} />
+                  <button
+                    onClick={() => avatarInputRef.current?.click()}
                     className="avatar-upload-btn"
                     disabled={isUploadingAvatar}
                   >
@@ -805,6 +873,11 @@ export default function PulseChat() {
                 <button onClick={saveProfile} className="sb-save-btn">Save Name</button>
               </div>
             )}
+
+            {/* NEW CALL HISTORY TOGGLE */}
+            <div className="sb-profile-toggle" onClick={() => setShowCallLogUI(true)}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 014.69 12a19.79 19.79 0 01-3.07-8.67A2 2 0 013.6 1.37h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L7.91 9a16 16 0 006.09 6.09l1.97-1.85a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7a2 2 0 011.72 2.03z" /></svg> Call History
+            </div>
 
             <div className="sb-divider"></div>
 
@@ -848,7 +921,7 @@ export default function PulseChat() {
                   <button key={c.phone_number} onClick={() => openChat({ type: "user", id: c.phone_number, name: c.nickname || c.display_name || c.phone_number })} className={`sb-item ${activeChat?.id === c.phone_number ? "sb-item--active" : ""}`}>
                     <div className="sb-av">
                       {c.avatar_url ? (
-                        <img src={c.avatar_url} alt="avatar" style={{width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover'}} />
+                        <img src={c.avatar_url} alt="avatar" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
                       ) : (
                         (c.nickname || c.display_name || c.phone_number)?.[0]?.toUpperCase() || "?"
                       )}
@@ -914,7 +987,7 @@ export default function PulseChat() {
               <div className="empty-state">
                 <div className="empty-rings">
                   <div className="ring r1"></div><div className="ring r2"></div><div className="ring r3"></div>
-                  <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ position: "relative", zIndex: 1 }}><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                  <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ position: "relative", zIndex: 1 }}><path d="M22 12h-4l-3 9L9 3l-3 9H2" /></svg>
                 </div>
                 <h3>No conversation open</h3>
                 <p>Select a contact or group from the sidebar to start messaging</p>
@@ -926,13 +999,13 @@ export default function PulseChat() {
                     <button className="mobile-back-btn" onClick={() => setActiveChat(null)}>
                       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6" /></svg>
                     </button>
-                    
+
                     {/* Header Avatar Fix */}
                     <div className={`hdr-av ${activeChat.type === "group" ? "hdr-av--group" : "hdr-av--dm"}`}>
                       {activeChat.type === "user" && contacts.find(c => c.phone_number === activeChat.id)?.avatar_url ? (
-                         <img src={contacts.find(c => c.phone_number === activeChat.id)!.avatar_url!} alt="avatar" style={{width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover'}} />
+                        <img src={contacts.find(c => c.phone_number === activeChat.id)!.avatar_url!} alt="avatar" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
                       ) : (
-                         activeChat.name?.[0]?.toUpperCase() || "?"
+                        activeChat.name?.[0]?.toUpperCase() || "?"
                       )}
                     </div>
 
@@ -1056,6 +1129,44 @@ export default function PulseChat() {
               </>
             )}
           </main>
+        </div>
+      )}
+
+      {/* NEW: Call History Modal */}
+      {showCallLogUI && (
+        <div className="file-viewer-overlay" onClick={() => setShowCallLogUI(false)}>
+          <div className="viewer-content call-log-modal" onClick={e => e.stopPropagation()} style={{ background: "var(--bg, #1e1e1e)", padding: "20px", borderRadius: "12px", width: "400px", maxWidth: "90vw", maxHeight: "80vh", overflowY: "auto", border: "1px solid rgba(255,255,255,0.1)", boxShadow: "0 10px 40px rgba(0,0,0,0.5)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px", borderBottom: "1px solid rgba(255,255,255,0.1)", paddingBottom: "10px" }}>
+              <h2 style={{ margin: 0, fontSize: "1.2rem", fontWeight: 600 }}>Call History</h2>
+              <button onClick={() => setShowCallLogUI(false)} style={{ background: "transparent", border: "none", color: "var(--text-muted, #aaa)", cursor: "pointer", fontSize: "1.2rem", padding: "5px" }}>✕</button>
+            </div>
+
+            {callLogs.length === 0 ? (
+              <p style={{ color: "var(--text-muted, #aaa)", textAlign: "center", padding: "40px 0", fontStyle: "italic" }}>No recent calls</p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                {callLogs.map(log => (
+                  <div key={log.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px", background: "rgba(255,255,255,0.03)", borderRadius: "8px" }}>
+                    <div>
+                      <strong style={{ display: "block", fontSize: "1rem", color: log.status === "missed" || log.status === "rejected" ? "#ff4d4f" : "var(--text, #fff)", marginBottom: "4px" }}>
+                        {log.peer}
+                      </strong>
+                      <span style={{ fontSize: "0.8rem", color: "var(--text-muted, #aaa)", display: "flex", gap: "6px", alignItems: "center" }}>
+                        <span>{log.direction === "incoming" ? "↙ Incoming" : "↗ Outgoing"}</span>
+                        <span>•</span>
+                        <span>{log.media === "video" ? "📹 Video" : "📞 Audio"}</span>
+                        <span>•</span>
+                        <span>{new Date(log.timestamp).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                      </span>
+                    </div>
+                    <div style={{ fontSize: "0.85rem", color: "var(--text-muted, #aaa)", fontWeight: 500 }}>
+                      {log.status === "completed" ? `${Math.floor(log.duration / 60)}m ${log.duration % 60}s` : <span style={{ textTransform: "capitalize" }}>{log.status}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
