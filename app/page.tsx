@@ -104,6 +104,12 @@ export default function PulseChat() {
 
   const [nicknames, setNicknames] = useState<Record<string, string>>({});
 
+  // Call feature states
+  const [callDuration, setCallDuration] = useState(0);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isSpeaker, setIsSpeaker] = useState(true);
+  const [facingMode, setFacingMode] = useState<"user" | "environment">("user");
+
   useEffect(() => {
     if (!currentUser) return;
     try {
@@ -136,8 +142,7 @@ export default function PulseChat() {
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
   const messagesCache = useRef<Record<string, Message[]>>({});
-  
-  // NEW: Queue to hold ICE candidates received before the connection is ready
+
   const iceCandidateQueueRef = useRef<RTCIceCandidateInit[]>([]);
 
   const callStateRef = useRef<CallState>("idle");
@@ -218,6 +223,66 @@ export default function PulseChat() {
     setTimeout(() => n.close(), 5000);
   };
 
+  const formatCallDuration = (sec: number) => {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  };
+
+  // Timer Effect for Call Duration
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (callState === "connected") {
+      interval = setInterval(() => {
+        setCallDuration(Math.floor((Date.now() - (callStartTimeRef.current || Date.now())) / 1000));
+      }, 1000);
+    } else {
+      setCallDuration(0);
+    }
+    return () => clearInterval(interval);
+  }, [callState]);
+
+  const toggleMute = () => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getAudioTracks().forEach(t => t.enabled = isMuted);
+      setIsMuted(!isMuted);
+    }
+  };
+
+  const toggleSpeaker = () => {
+    setIsSpeaker(!isSpeaker);
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.volume = isSpeaker ? 0.2 : 1.0;
+    }
+  };
+
+  const switchCamera = async () => {
+    if (!isVideoCall || !localStreamRef.current) return;
+    const newFacingMode = facingMode === "user" ? "environment" : "user";
+    try {
+      const videoStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: newFacingMode }
+      });
+      const newVideoTrack = videoStream.getVideoTracks()[0];
+      const oldVideoTrack = localStreamRef.current.getVideoTracks()[0];
+
+      if (oldVideoTrack) {
+        oldVideoTrack.stop();
+        localStreamRef.current.removeTrack(oldVideoTrack);
+      }
+      localStreamRef.current.addTrack(newVideoTrack);
+      if (localVideoRef.current) localVideoRef.current.srcObject = localStreamRef.current;
+
+      if (peerConnectionRef.current) {
+        const sender = peerConnectionRef.current.getSenders().find(s => s.track?.kind === "video");
+        if (sender) sender.replaceTrack(newVideoTrack);
+      }
+      setFacingMode(newFacingMode);
+    } catch (e) {
+      console.error("Camera switch failed", e);
+    }
+  };
+
   const endCall = useCallback((sendSignal = true, explicitStatus?: "completed" | "missed" | "rejected") => {
     if (callPeer && callDirectionRef.current) {
       const duration = callStartTimeRef.current && callStateRef.current === "connected"
@@ -254,9 +319,15 @@ export default function PulseChat() {
     pendingRemoteDescriptionRef.current = null;
     localStreamRef.current = null;
     remoteStreamRef.current = null;
-    iceCandidateQueueRef.current = []; // Clear the ICE queue
+    iceCandidateQueueRef.current = [];
     updateCallState("idle");
     setCallPeer(null);
+
+    // Reset UI Feature States
+    setIsMuted(false);
+    setIsSpeaker(true);
+    setFacingMode("user");
+    setCallDuration(0);
 
     callStartTimeRef.current = null;
     callDirectionRef.current = null;
@@ -378,7 +449,7 @@ export default function PulseChat() {
           break;
 
         case "call_offer":
-          iceCandidateQueueRef.current = []; // Clear queue for new incoming call
+          iceCandidateQueueRef.current = [];
           setCallPeer(String(data.user || ""));
           setIsVideoCall(Boolean(data.isVideo));
           updateCallState("incoming");
@@ -390,8 +461,7 @@ export default function PulseChat() {
             await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.sdp as RTCSessionDescriptionInit));
             updateCallState("connected");
             callStartTimeRef.current = Date.now();
-            
-            // Process any ICE candidates that were queued while creating the connection
+
             while (iceCandidateQueueRef.current.length > 0) {
               const candidate = iceCandidateQueueRef.current.shift();
               if (candidate) {
@@ -401,8 +471,6 @@ export default function PulseChat() {
           }
           break;
         case "ice_candidate":
-          // Only add candidate directly if remote description is already set.
-          // Otherwise, push it to the queue.
           if (peerConnectionRef.current && peerConnectionRef.current.remoteDescription) {
             await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate as RTCIceCandidateInit)).catch(console.error);
           } else {
@@ -706,8 +774,7 @@ export default function PulseChat() {
       remoteStreamRef.current = event.streams[0];
       if (remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = remoteStreamRef.current;
-        // Explicitly call play to ensure media renders immediately when the track updates
-        remoteVideoRef.current.play().catch(() => {});
+        remoteVideoRef.current.play().catch(() => { });
       }
     };
 
@@ -727,7 +794,7 @@ export default function PulseChat() {
         localStreamRef.current.getTracks().forEach(track => track.stop());
       }
 
-      iceCandidateQueueRef.current = []; // Clear queue on new call
+      iceCandidateQueueRef.current = [];
       setIsVideoCall(video);
       updateCallState("calling");
       setCallPeer(target);
@@ -769,7 +836,6 @@ export default function PulseChat() {
       const offer = new RTCSessionDescription(pendingRemoteDescriptionRef.current);
       await peerConnection.setRemoteDescription(offer);
 
-      // Process any ICE candidates that were queued while setting up the media
       while (iceCandidateQueueRef.current.length > 0) {
         const candidate = iceCandidateQueueRef.current.shift();
         if (candidate) {
@@ -1446,6 +1512,11 @@ export default function PulseChat() {
             <div className={`video-container ${(isVideoCall && (callState === "connected" || callState === "calling")) ? "d-block" : "d-none"}`}>
               <video ref={remoteVideoRef} className="remote-video" autoPlay playsInline></video>
               <video ref={localVideoRef} className="local-video" autoPlay playsInline muted></video>
+              {callState === "connected" && (
+                <div className="video-duration-overlay">
+                  {formatCallDuration(callDuration)}
+                </div>
+              )}
             </div>
 
             {(!isVideoCall || callState !== "connected") && (
@@ -1460,7 +1531,9 @@ export default function PulseChat() {
                   })()}
                 </h2>
                 <p className="call-status">
-                  {callState === "incoming" ? `Incoming ${isVideoCall ? "Video" : "Voice"} Call...` : callState === "calling" ? "Calling..." : "Connected"}
+                  {callState === "incoming" ? `Incoming ${isVideoCall ? "Video" : "Voice"} Call...`
+                    : callState === "calling" ? "Calling..."
+                      : `Connected • ${formatCallDuration(callDuration)}`}
                 </p>
               </div>
             )}
@@ -1472,6 +1545,31 @@ export default function PulseChat() {
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 014.69 12a19.79 19.79 0 01-3.07-8.67A2 2 0 013.6 1.37h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L7.91 9a16 16 0 006.09 6.09l1.97-1.85a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7a2 2 0 011.72 2.03z" /></svg>
                   </button>
                   <button onClick={acceptCall} className="call-btn btn-accept" title="Accept">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 014.69 12a19.79 19.79 0 01-3.07-8.67A2 2 0 013.6 1.37h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L7.91 9a16 16 0 006.09 6.09l1.97-1.85a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7a2 2 0 011.72 2.03z" /></svg>
+                  </button>
+                </>
+              ) : callState === "connected" ? (
+                <>
+                  <button onClick={toggleMute} className={`call-btn btn-secondary ${isMuted ? 'active-mute' : ''}`} title={isMuted ? "Unmute" : "Mute"}>
+                    {isMuted ? (
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+                    ) : (
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+                    )}
+                  </button>
+                  {isVideoCall && (
+                    <button onClick={switchCamera} className="call-btn btn-secondary" title="Switch Camera">
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10"></polyline><polyline points="23 20 23 14 17 14"></polyline><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"></path></svg>
+                    </button>
+                  )}
+                  <button onClick={toggleSpeaker} className={`call-btn btn-secondary ${!isSpeaker ? 'active-mute' : ''}`} title={isSpeaker ? "Speaker Off" : "Speaker On"}>
+                    {isSpeaker ? (
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+                    ) : (
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>
+                    )}
+                  </button>
+                  <button onClick={() => endCall(true)} className="call-btn btn-end" title="End Call">
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 014.69 12a19.79 19.79 0 01-3.07-8.67A2 2 0 013.6 1.37h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L7.91 9a16 16 0 006.09 6.09l1.97-1.85a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7a2 2 0 011.72 2.03z" /></svg>
                   </button>
                 </>
