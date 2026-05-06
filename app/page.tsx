@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import "./globals.css"; // Ensure you import the CSS file
+import "./globals.css";
 
 type Chat = { type: "user" | "group"; id: string | number; name: string };
 type Contact = {
@@ -136,6 +136,9 @@ export default function PulseChat() {
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
   const messagesCache = useRef<Record<string, Message[]>>({});
+  
+  // NEW: Queue to hold ICE candidates received before the connection is ready
+  const iceCandidateQueueRef = useRef<RTCIceCandidateInit[]>([]);
 
   const callStateRef = useRef<CallState>("idle");
   const callStartTimeRef = useRef<number | null>(null);
@@ -251,6 +254,7 @@ export default function PulseChat() {
     pendingRemoteDescriptionRef.current = null;
     localStreamRef.current = null;
     remoteStreamRef.current = null;
+    iceCandidateQueueRef.current = []; // Clear the ICE queue
     updateCallState("idle");
     setCallPeer(null);
 
@@ -374,6 +378,7 @@ export default function PulseChat() {
           break;
 
         case "call_offer":
+          iceCandidateQueueRef.current = []; // Clear queue for new incoming call
           setCallPeer(String(data.user || ""));
           setIsVideoCall(Boolean(data.isVideo));
           updateCallState("incoming");
@@ -385,11 +390,23 @@ export default function PulseChat() {
             await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.sdp as RTCSessionDescriptionInit));
             updateCallState("connected");
             callStartTimeRef.current = Date.now();
+            
+            // Process any ICE candidates that were queued while creating the connection
+            while (iceCandidateQueueRef.current.length > 0) {
+              const candidate = iceCandidateQueueRef.current.shift();
+              if (candidate) {
+                await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate)).catch(console.error);
+              }
+            }
           }
           break;
         case "ice_candidate":
-          if (peerConnectionRef.current?.setRemoteDescription) {
-            await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate as RTCIceCandidateInit));
+          // Only add candidate directly if remote description is already set.
+          // Otherwise, push it to the queue.
+          if (peerConnectionRef.current && peerConnectionRef.current.remoteDescription) {
+            await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate as RTCIceCandidateInit)).catch(console.error);
+          } else {
+            iceCandidateQueueRef.current.push(data.candidate as RTCIceCandidateInit);
           }
           break;
         case "call_end":
@@ -687,7 +704,11 @@ export default function PulseChat() {
 
     peerConnection.ontrack = (event) => {
       remoteStreamRef.current = event.streams[0];
-      if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStreamRef.current;
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = remoteStreamRef.current;
+        // Explicitly call play to ensure media renders immediately when the track updates
+        remoteVideoRef.current.play().catch(() => {});
+      }
     };
 
     peerConnection.onicecandidate = (event) => {
@@ -706,6 +727,7 @@ export default function PulseChat() {
         localStreamRef.current.getTracks().forEach(track => track.stop());
       }
 
+      iceCandidateQueueRef.current = []; // Clear queue on new call
       setIsVideoCall(video);
       updateCallState("calling");
       setCallPeer(target);
@@ -746,6 +768,14 @@ export default function PulseChat() {
       if (!peerConnection || ws?.readyState !== WebSocket.OPEN) throw new Error("Call connection is not ready");
       const offer = new RTCSessionDescription(pendingRemoteDescriptionRef.current);
       await peerConnection.setRemoteDescription(offer);
+
+      // Process any ICE candidates that were queued while setting up the media
+      while (iceCandidateQueueRef.current.length > 0) {
+        const candidate = iceCandidateQueueRef.current.shift();
+        if (candidate) {
+          await peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch(console.error);
+        }
+      }
 
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
