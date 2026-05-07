@@ -11,7 +11,7 @@ type Contact = {
   is_online?: boolean;
   avatar_url?: string | null;
 };
-type Group = { id: string | number; name: string; members: string[] };
+type Group = { id: string | number; name: string; members: any[]; avatar_url?: string | null };
 type Message = {
   id: string | number;
   user: string;
@@ -24,6 +24,11 @@ type Message = {
   is_read?: boolean;
   is_deleted?: boolean;
   edited_at?: string;
+  // New properties for Replies, Reactions, and Group Read Receipts
+  reply_to_id?: string | number;
+  reply_to_content?: string;
+  reactions?: Record<string, string[]>;
+  read_by?: string[];
 };
 type GroupedMessage = ({ type: "divider"; label: string } | ({ type: "msg" } & Message));
 type CallState = "idle" | "incoming" | "calling" | "connected";
@@ -43,6 +48,16 @@ const errorMessage = (error: unknown) => error instanceof Error ? error.message 
 
 const API = process.env.NEXT_PUBLIC_API_URL || "https://pratik0165-cipherbackend.hf.space";
 const WS = process.env.NEXT_PUBLIC_WS_URL || API.replace(/^http/, "ws");
+
+const getPhone = (m: any) => {
+  if (!m) return "";
+  return typeof m === "object" ? m.phone : m;
+};
+
+const getIsAdmin = (m: any) => {
+  if (!m || typeof m !== "object") return false;
+  return !!m.is_admin;
+};
 
 export default function PulseChat() {
   const [isMounted, setIsMounted] = useState(false);
@@ -78,8 +93,14 @@ export default function PulseChat() {
   const [editingText, setEditingText] = useState("");
   const [typingSet, setTypingSet] = useState<Set<string>>(new Set());
 
+  // New Quality of Life States
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  const [reactionPickerId, setReactionPickerId] = useState<string | number | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+
   const [showEmojis, setShowEmojis] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [showMyProfileSettings, setShowMyProfileSettings] = useState(false);
   const [showCallLogUI, setShowCallLogUI] = useState(false);
   const [showNewGroup, setShowNewGroup] = useState(false);
   const [showNewContact, setShowNewContact] = useState(false);
@@ -89,6 +110,12 @@ export default function PulseChat() {
   const [newGroupMembers, setNewGroupMembers] = useState("");
   const [editDisplayName, setEditDisplayName] = useState("");
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+
+  // Group Management States
+  const [showGroupProfile, setShowGroupProfile] = useState(false);
+  const [newGroupMemberPhone, setNewGroupMemberPhone] = useState("");
+  const [isUploadingGroupAvatar, setIsUploadingGroupAvatar] = useState(false);
+  const groupAvatarInputRef = useRef<HTMLInputElement | null>(null);
 
   const [isRecording, setIsRecording] = useState(false);
   const [callState, setCallState] = useState<CallState>("idle");
@@ -109,6 +136,10 @@ export default function PulseChat() {
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeaker, setIsSpeaker] = useState(true);
   const [facingMode, setFacingMode] = useState<"user" | "environment">("user");
+  const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
+
+  // Long press timer ref for reactions
+  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -138,6 +169,7 @@ export default function PulseChat() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
+  const pcMapRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const pendingRemoteDescriptionRef = useRef<RTCSessionDescriptionInit | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
@@ -155,6 +187,7 @@ export default function PulseChat() {
   }, []);
 
   const emojis = ["😀", "😂", "🥰", "😎", "🤔", "😭", "😡", "👍", "❤️", "🔥", "🎉", "🚀", "✅", "💯", "🙏", "🫡", "😤", "🤩", "💀", "🫶"];
+  const reactionEmojis = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
   const PAGE = 50;
 
   const isTyping = useMemo(() => activeChat?.type === "user" && typingSet.has(String(activeChat.id)), [activeChat, typingSet]);
@@ -229,7 +262,6 @@ export default function PulseChat() {
     return `${m}:${s.toString().padStart(2, "0")}`;
   };
 
-  // Timer Effect for Call Duration
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (callState === "connected") {
@@ -273,10 +305,11 @@ export default function PulseChat() {
       localStreamRef.current.addTrack(newVideoTrack);
       if (localVideoRef.current) localVideoRef.current.srcObject = localStreamRef.current;
 
-      if (peerConnectionRef.current) {
-        const sender = peerConnectionRef.current.getSenders().find(s => s.track?.kind === "video");
+      pcMapRef.current.forEach(pc => {
+        const sender = pc.getSenders().find(s => s.track?.kind === "video");
         if (sender) sender.replaceTrack(newVideoTrack);
-      }
+      });
+
       setFacingMode(newFacingMode);
     } catch (e) {
       console.error("Camera switch failed", e);
@@ -310,8 +343,13 @@ export default function PulseChat() {
     if (sendSignal && callPeer && wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "call_end", target_user: callPeer }));
     }
+
     if (localStreamRef.current) localStreamRef.current.getTracks().forEach(t => t.stop());
+
+    pcMapRef.current.forEach(pc => pc.close());
+    pcMapRef.current.clear();
     if (peerConnectionRef.current) peerConnectionRef.current.close();
+
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
 
@@ -320,10 +358,10 @@ export default function PulseChat() {
     localStreamRef.current = null;
     remoteStreamRef.current = null;
     iceCandidateQueueRef.current = [];
+    setRemoteStreams({});
     updateCallState("idle");
     setCallPeer(null);
 
-    // Reset UI Feature States
     setIsMuted(false);
     setIsSpeaker(true);
     setFacingMode("user");
@@ -423,6 +461,10 @@ export default function PulseChat() {
                 return next;
               });
               setTimeout(scrollBottom, 50);
+              // Send read receipt for group message
+              if (data.user !== currentUser && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: "read_receipt", target_user: data.user, group_id: data.group_id, message_id: data.id }));
+              }
             } else if (data.user !== currentUser) {
               setUnread(prev => ({ ...prev, [String(data.group_id)]: (prev[String(data.group_id)] || 0) + 1 }));
               notify(`${data.group_name}`, `${data.user}: ${data.content}`);
@@ -431,8 +473,42 @@ export default function PulseChat() {
           });
           break;
         }
+        case "reaction": {
+          // Handle incoming emoji reactions
+          setActiveChat(currentActive => {
+            setMessages(prev => prev.map(m => {
+              if (m.id === data.message_id) {
+                const current = m.reactions || {};
+                const users = current[data.emoji as string] || [];
+                if (!users.includes(String(data.user))) {
+                  return { ...m, reactions: { ...current, [data.emoji as string]: [...users, String(data.user)] } };
+                }
+              }
+              return m;
+            }));
+            if (currentActive) {
+              messagesCache.current[currentActive.id] = messages;
+            }
+            return currentActive;
+          });
+          break;
+        }
         case "read_receipt":
-          setMessages(prev => prev.map(m => m.user === currentUser ? { ...m, is_read: true } : m));
+          setMessages(prev => prev.map(m => {
+            if (m.user === currentUser) {
+              if (data.group_id && m.group_id === data.group_id) {
+                // Group read receipts
+                const rb = m.read_by || [];
+                if (!rb.includes(String(data.user))) {
+                  return { ...m, is_read: true, read_by: [...rb, String(data.user)] };
+                }
+              } else if (!data.group_id && !m.group_id) {
+                // DM read receipt
+                return { ...m, is_read: true };
+              }
+            }
+            return m;
+          }));
           break;
         case "message_edited": {
           setActiveChat(currentActive => {
@@ -457,22 +533,24 @@ export default function PulseChat() {
           pendingRemoteDescriptionRef.current = data.sdp as RTCSessionDescriptionInit;
           break;
         case "call_answer":
-          if (peerConnectionRef.current) {
-            await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.sdp as RTCSessionDescriptionInit));
+          const pcAnswer = pcMapRef.current.get(String(data.user)) || peerConnectionRef.current;
+          if (pcAnswer) {
+            await pcAnswer.setRemoteDescription(new RTCSessionDescription(data.sdp as RTCSessionDescriptionInit));
             updateCallState("connected");
             callStartTimeRef.current = Date.now();
 
             while (iceCandidateQueueRef.current.length > 0) {
               const candidate = iceCandidateQueueRef.current.shift();
               if (candidate) {
-                await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate)).catch(console.error);
+                await pcAnswer.addIceCandidate(new RTCIceCandidate(candidate)).catch(console.error);
               }
             }
           }
           break;
         case "ice_candidate":
-          if (peerConnectionRef.current && peerConnectionRef.current.remoteDescription) {
-            await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate as RTCIceCandidateInit)).catch(console.error);
+          const pcIce = pcMapRef.current.get(String(data.user)) || peerConnectionRef.current;
+          if (pcIce && pcIce.remoteDescription) {
+            await pcIce.addIceCandidate(new RTCIceCandidate(data.candidate as RTCIceCandidateInit)).catch(console.error);
           } else {
             iceCandidateQueueRef.current.push(data.candidate as RTCIceCandidateInit);
           }
@@ -536,6 +614,9 @@ export default function PulseChat() {
     setNicknames({});
     setShowHeaderNicknameEdit(false);
     setShowContactProfile(false);
+    setShowGroupProfile(false);
+    setShowMyProfileSettings(false);
+    setSearchQuery("");
     localStorage.removeItem("chat_token"); localStorage.removeItem("chat_user");
     if (wsRef.current) { wsRef.current.onclose = null; wsRef.current.close(); wsRef.current = null; }
   };
@@ -566,6 +647,54 @@ export default function PulseChat() {
       setShowProfile(false);
     } catch {
       alert("Failed to save profile");
+    }
+  };
+
+  const handleGroupAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!activeChat || activeChat.type !== "group") return;
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingGroupAvatar(true);
+    const form = new FormData();
+    form.append("file", file);
+
+    try {
+      const res = await fetch(`${API}/upload`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form });
+      if (!res.ok) throw new Error("Upload failed");
+      const data = await res.json();
+
+      await apiFetch(`/groups/${activeChat.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ avatar_url: data.url })
+      });
+
+      setGroups(prev => prev.map(g => g.id === activeChat.id ? { ...g, avatar_url: data.url } : g));
+    } catch {
+      alert("Group avatar upload failed");
+    } finally {
+      setIsUploadingGroupAvatar(false);
+    }
+  };
+
+  const addGroupMember = async () => {
+    if (!activeChat || activeChat.type !== "group" || !newGroupMemberPhone.trim()) return;
+    const groupId = activeChat.id;
+    const group = groups.find(g => g.id === groupId);
+    if (!group) return;
+
+    const newMemberObj = { phone: newGroupMemberPhone.trim(), is_admin: false };
+    const updatedMembers = [...group.members, newMemberObj];
+
+    try {
+      await apiFetch(`/groups/${groupId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ members: updatedMembers })
+      });
+      setGroups(prev => prev.map(g => g.id === groupId ? { ...g, members: updatedMembers } : g));
+      setNewGroupMemberPhone("");
+    } catch (err) {
+      alert("Failed to add member: " + errorMessage(err));
     }
   };
 
@@ -605,6 +734,11 @@ export default function PulseChat() {
     setActiveChat(chat);
     setShowHeaderNicknameEdit(false);
     setShowContactProfile(false);
+    setShowGroupProfile(false);
+    setSearchQuery("");
+    setReplyingTo(null);
+    setReactionPickerId(null);
+
     if (messagesCache.current[chat.id]) {
       setMessages(messagesCache.current[chat.id]);
       setTimeout(scrollBottom, 10);
@@ -630,7 +764,8 @@ export default function PulseChat() {
       user: currentUser,
       content: text,
       timestamp: new Date().toISOString(),
-      ...(type === "user" ? { target_user: String(id) } : { group_id: id, group_name: activeChat.name })
+      ...(type === "user" ? { target_user: String(id) } : { group_id: id, group_name: activeChat.name }),
+      ...(replyingTo ? { reply_to_id: replyingTo.id, reply_to_content: replyingTo.content } : {})
     };
 
     setMessages(prev => {
@@ -640,9 +775,50 @@ export default function PulseChat() {
     });
     setTimeout(scrollBottom, 50);
 
-    wsRef.current.send(JSON.stringify(type === "user"
-      ? { type: "direct_message", target_user: id, content: text, message_type: "text" }
-      : { type: "group_message", group_id: id, content: text, message_type: "text" }));
+    const payload = {
+      type: type === "user" ? "direct_message" : "group_message",
+      content: text,
+      message_type: "text",
+      ...(type === "user" ? { target_user: id } : { group_id: id }),
+      ...(replyingTo ? { reply_to_id: replyingTo.id, reply_to_content: replyingTo.content } : {})
+    };
+
+    wsRef.current.send(JSON.stringify(payload));
+    setReplyingTo(null);
+  };
+
+  const sendReaction = (msgId: string | number, emoji: string) => {
+    if (!activeChat || wsRef.current?.readyState !== WebSocket.OPEN) return;
+
+    setMessages(prev => prev.map(m => {
+      if (m.id === msgId) {
+        const current = m.reactions || {};
+        const users = current[emoji] || [];
+        if (!users.includes(currentUser)) {
+          return { ...m, reactions: { ...current, [emoji]: [...users, currentUser] } };
+        }
+      }
+      return m;
+    }));
+
+    setReactionPickerId(null);
+
+    wsRef.current.send(JSON.stringify({
+      type: "reaction",
+      message_id: msgId,
+      emoji,
+      ...(activeChat.type === 'user' ? { target_user: activeChat.id } : { group_id: activeChat.id })
+    }));
+  };
+
+  const handleTouchStart = (e: React.TouchEvent | React.MouseEvent, id: string | number) => {
+    longPressTimer.current = setTimeout(() => {
+      setReactionPickerId(id);
+    }, 500); // 500ms long press
+  };
+
+  const handleTouchEnd = () => {
+    if (longPressTimer.current) clearTimeout(longPressTimer.current);
   };
 
   const saveEdit = async () => {
@@ -696,7 +872,8 @@ export default function PulseChat() {
         user: currentUser,
         content: tag,
         timestamp: new Date().toISOString(),
-        ...(type === "user" ? { target_user: String(id) } : { group_id: id, group_name: activeChat.name })
+        ...(type === "user" ? { target_user: String(id) } : { group_id: id, group_name: activeChat.name }),
+        ...(replyingTo ? { reply_to_id: replyingTo.id, reply_to_content: replyingTo.content } : {})
       };
 
       setMessages(prev => {
@@ -706,9 +883,16 @@ export default function PulseChat() {
       });
       setTimeout(scrollBottom, 50);
 
-      wsRef.current?.send(JSON.stringify(type === "user"
-        ? { type: "direct_message", target_user: id, content: tag, message_type: msgType }
-        : { type: "group_message", group_id: id, content: tag, message_type: msgType }));
+      const payload = {
+        type: type === "user" ? "direct_message" : "group_message",
+        content: tag,
+        message_type: msgType,
+        ...(type === "user" ? { target_user: id } : { group_id: id }),
+        ...(replyingTo ? { reply_to_id: replyingTo.id, reply_to_content: replyingTo.content } : {})
+      };
+
+      wsRef.current?.send(JSON.stringify(payload));
+      setReplyingTo(null);
     } catch { }
     e.target.value = "";
   };
@@ -743,7 +927,8 @@ export default function PulseChat() {
           user: currentUser,
           content: tag,
           timestamp: new Date().toISOString(),
-          ...(type === "user" ? { target_user: String(id) } : { group_id: id, group_name: activeChat.name })
+          ...(type === "user" ? { target_user: String(id) } : { group_id: id, group_name: activeChat.name }),
+          ...(replyingTo ? { reply_to_id: replyingTo.id, reply_to_content: replyingTo.content } : {})
         };
         setMessages(prev => {
           const next = [...prev, optimisticMsg];
@@ -752,9 +937,16 @@ export default function PulseChat() {
         });
         setTimeout(scrollBottom, 50);
 
-        wsRef.current?.send(JSON.stringify(type === "user"
-          ? { type: "direct_message", target_user: id, content: tag, message_type: "audio" }
-          : { type: "group_message", group_id: id, content: tag, message_type: "audio" }));
+        const payload = {
+          type: type === "user" ? "direct_message" : "group_message",
+          content: tag,
+          message_type: "audio",
+          ...(type === "user" ? { target_user: id } : { group_id: id }),
+          ...(replyingTo ? { reply_to_id: replyingTo.id, reply_to_content: replyingTo.content } : {})
+        };
+
+        wsRef.current?.send(JSON.stringify(payload));
+        setReplyingTo(null);
       };
       mr.start(); setIsRecording(true);
     } catch { }
@@ -767,13 +959,16 @@ export default function PulseChat() {
     if (!localStream) throw new Error("Local media stream is not available");
 
     const peerConnection = new RTCPeerConnection(rtcConfig);
+    pcMapRef.current.set(targetUser, peerConnection);
     peerConnectionRef.current = peerConnection;
+
     localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
 
     peerConnection.ontrack = (event) => {
       remoteStreamRef.current = event.streams[0];
+      setRemoteStreams(prev => ({ ...prev, [targetUser]: event.streams[0] }));
       if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = remoteStreamRef.current;
+        remoteVideoRef.current.srcObject = event.streams[0];
         remoteVideoRef.current.play().catch(() => { });
       }
     };
@@ -783,11 +978,19 @@ export default function PulseChat() {
         wsRef.current.send(JSON.stringify({ type: "ice_candidate", target_user: targetUser, candidate: event.candidate }));
       }
     };
+
+    return peerConnection;
   };
 
   const startCall = async (video = true) => {
-    if (!activeChat || activeChat.type !== "user") return;
-    const target = String(activeChat.id);
+    if (!activeChat) return;
+
+    const isGroup = activeChat.type === "group";
+    const targetIds = isGroup
+      ? groups.find(g => g.id === activeChat.id)?.members.map(getPhone).filter(m => m !== currentUser) || []
+      : [String(activeChat.id)];
+
+    if (targetIds.length === 0) return;
 
     try {
       if (localStreamRef.current) {
@@ -797,20 +1000,18 @@ export default function PulseChat() {
       iceCandidateQueueRef.current = [];
       setIsVideoCall(video);
       updateCallState("calling");
-      setCallPeer(target);
+      setCallPeer(isGroup ? String(activeChat.name) : targetIds[0]);
       callDirectionRef.current = "outgoing";
 
       localStreamRef.current = await navigator.mediaDevices.getUserMedia({ video, audio: true });
       if (localVideoRef.current) localVideoRef.current.srcObject = localStreamRef.current;
 
-      await setupWebRTC(target);
-      const peerConnection = peerConnectionRef.current;
-      const ws = wsRef.current;
-      if (!peerConnection || ws?.readyState !== WebSocket.OPEN) throw new Error("Call connection is not ready");
-      const offer = await peerConnection.createOffer();
-      await peerConnection.setLocalDescription(offer);
-
-      ws.send(JSON.stringify({ type: "call_offer", target_user: target, sdp: offer, isVideo: video }));
+      for (const target of targetIds) {
+        const pc = await setupWebRTC(target);
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        wsRef.current?.send(JSON.stringify({ type: "call_offer", target_user: target, sdp: offer, isVideo: video }));
+      }
     } catch (err: any) {
       console.error("Media access failed:", err);
       alert(`Could not access camera/microphone. Reason: ${err.name || err.message}`);
@@ -828,11 +1029,11 @@ export default function PulseChat() {
       if (localVideoRef.current) localVideoRef.current.srcObject = localStreamRef.current;
 
       if (!callPeer || !pendingRemoteDescriptionRef.current) throw new Error("Call offer is not available");
-      await setupWebRTC(callPeer);
 
-      const peerConnection = peerConnectionRef.current;
+      const peerConnection = await setupWebRTC(callPeer);
       const ws = wsRef.current;
       if (!peerConnection || ws?.readyState !== WebSocket.OPEN) throw new Error("Call connection is not ready");
+
       const offer = new RTCSessionDescription(pendingRemoteDescriptionRef.current);
       await peerConnection.setRemoteDescription(offer);
 
@@ -872,6 +1073,34 @@ export default function PulseChat() {
     return d.toLocaleDateString([], { month: "short", day: "numeric" });
   };
 
+  const contactLabel = (c: Contact) => nicknames[c.phone_number] || c.display_name || c.phone_number;
+
+  // Global Search Filtering
+  const filteredContacts = useMemo(() => {
+    if (!searchQuery) return contacts;
+    return contacts.filter(c => contactLabel(c).toLowerCase().includes(searchQuery.toLowerCase()));
+  }, [contacts, nicknames, searchQuery]);
+
+  const filteredGroups = useMemo(() => {
+    if (!searchQuery) return groups;
+    return groups.filter(g => g.name.toLowerCase().includes(searchQuery.toLowerCase()));
+  }, [groups, searchQuery]);
+
+  const searchMessageResults = useMemo(() => {
+    if (!searchQuery) return [];
+    const results: (Message & { chatId: string | number, chatType: "user" | "group" })[] = [];
+    Object.entries(messagesCache.current).forEach(([chatId, msgs]) => {
+      // Basic check to see if it's a group or dm based on active lists
+      const isGroup = groups.some(g => String(g.id) === chatId);
+      msgs.forEach(m => {
+        if (m.content.toLowerCase().includes(searchQuery.toLowerCase()) && !m.content.startsWith("[")) {
+          results.push({ ...m, chatId, chatType: isGroup ? "group" : "user" });
+        }
+      });
+    });
+    return results;
+  }, [searchQuery, groups]);
+
   const groupedMessages = useMemo(() => {
     const out: GroupedMessage[] = []; let lastDate: string | null = null;
     for (const msg of messages) {
@@ -881,8 +1110,6 @@ export default function PulseChat() {
     }
     return out;
   }, [messages]);
-
-  const contactLabel = (c: Contact) => nicknames[c.phone_number] || c.display_name || c.phone_number;
 
   if (!isMounted) return (
     <div className="app loading-screen">
@@ -965,8 +1192,16 @@ export default function PulseChat() {
       ) : (
         <div className={`shell ${activeChat ? "chat-active" : ""}`}>
           <aside className="sidebar">
-            <div className="sb-identity">
-              <div className="sb-id-avatar">
+            <div className="sb-identity cursor-pointer" onClick={() => setShowMyProfileSettings(!showMyProfileSettings)}>
+              <div
+                className="sb-id-avatar"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (profile.avatarUrl) {
+                    setViewFile({ url: profile.avatarUrl, type: "avatar-circle" });
+                  }
+                }}
+              >
                 {profile.avatarUrl ? (
                   <img src={profile.avatarUrl} alt="Avatar" className="img-cover rounded-sq" />
                 ) : (
@@ -979,42 +1214,46 @@ export default function PulseChat() {
               </div>
             </div>
 
-            <button onClick={logout} className="logout-bar">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" /></svg> Sign Out
-            </button>
+            {showMyProfileSettings && (
+              <div className="my-profile-settings-panel">
+                <button onClick={logout} className="logout-bar">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" /></svg> Sign Out
+                </button>
 
-            <div className="sb-profile-toggle" onClick={() => setShowProfile(!showProfile)}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" /></svg> Edit My Profile
-              <svg className={`chevron ${showProfile ? "chevron--up" : ""}`} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6,9 12,15 18,9" /></svg>
-            </div>
-
-            {showProfile && (
-              <div className="sb-profile-form drop">
-                <input type="file" ref={avatarInputRef} accept="image/*" className="hidden-input" onChange={handleAvatarUpload} />
-                <div className="avatar-edit-section">
-                  <div className="avatar-edit-row">
-                    <div className="avatar-edit-box">
-                      {profile.avatarUrl
-                        ? <img src={profile.avatarUrl} alt="Avatar" className="img-cover" />
-                        : (profile.displayName || currentUser)?.[0]?.toUpperCase() || "?"}
-                    </div>
-                    <button
-                      onClick={() => avatarInputRef.current?.click()}
-                      className="avatar-upload-btn"
-                      disabled={isUploadingAvatar}
-                    >
-                      {isUploadingAvatar ? "Uploading…" : "📷 Change Picture"}
-                    </button>
-                  </div>
-                  <p className="text-muted-sm">
-                    Your profile picture is visible to all your contacts.
-                  </p>
+                <div className="sb-profile-toggle" onClick={() => setShowProfile(!showProfile)}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" /></svg> Edit My Profile
+                  <svg className={`chevron ${showProfile ? "chevron--up" : ""}`} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6,9 12,15 18,9" /></svg>
                 </div>
-                <input value={editDisplayName} onChange={e => setEditDisplayName(e.target.value)} placeholder="Display name…" className="sb-field" />
-                <p className="text-muted-sm text-muted-sm-margin">
-                  Your display name is shown to everyone who has your number.
-                </p>
-                <button onClick={saveProfile} className="sb-save-btn">Save Profile</button>
+
+                {showProfile && (
+                  <div className="sb-profile-form drop">
+                    <input type="file" ref={avatarInputRef} accept="image/*" className="hidden-input" onChange={handleAvatarUpload} />
+                    <div className="avatar-edit-section">
+                      <div className="avatar-edit-row">
+                        <div className="avatar-edit-box">
+                          {profile.avatarUrl
+                            ? <img src={profile.avatarUrl} alt="Avatar" className="img-cover" />
+                            : (profile.displayName || currentUser)?.[0]?.toUpperCase() || "?"}
+                        </div>
+                        <button
+                          onClick={() => avatarInputRef.current?.click()}
+                          className="avatar-upload-btn"
+                          disabled={isUploadingAvatar}
+                        >
+                          {isUploadingAvatar ? "Uploading…" : "📷 Change Picture"}
+                        </button>
+                      </div>
+                      <p className="text-muted-sm">
+                        Your profile picture is visible to all your contacts.
+                      </p>
+                    </div>
+                    <input value={editDisplayName} onChange={e => setEditDisplayName(e.target.value)} placeholder="Display name…" className="sb-field" />
+                    <p className="text-muted-sm text-muted-sm-margin">
+                      Your display name is shown to everyone who has your number.
+                    </p>
+                    <button onClick={saveProfile} className="sb-save-btn">Save Profile</button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1023,6 +1262,46 @@ export default function PulseChat() {
             </div>
 
             <div className="sb-divider"></div>
+
+            {/* Global Search Bar */}
+            <div className="sb-search-container">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Search chats & messages..."
+                className="sb-search-input"
+              />
+            </div>
+
+            {searchQuery && searchMessageResults.length > 0 && (
+              <div className="sb-section search-results-section">
+                <div className="sb-section-hdr">
+                  <div className="sb-section-label">Message Results</div>
+                </div>
+                <div className="sb-list">
+                  {searchMessageResults.map(m => {
+                    const groupName = groups.find(g => String(g.id) === m.chatId)?.name;
+                    const c = contacts.find(contact => contact.phone_number === m.chatId);
+                    const chatName = m.chatType === "group" ? groupName : (c ? contactLabel(c) : m.chatId);
+
+                    return (
+                      <button
+                        key={`${m.chatId}-${m.id}`}
+                        className="sb-item"
+                        onClick={() => openChat({ type: m.chatType, id: m.chatId, name: chatName || String(m.chatId) })}
+                      >
+                        <div className="sb-item-body mw-0">
+                          <span className="sb-item-name name-row">{chatName}</span>
+                          <span className="sb-item-status text-truncate">{m.content}</span>
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+                <div className="sb-divider"></div>
+              </div>
+            )}
 
             <div className="sb-section">
               <div className="sb-section-hdr">
@@ -1061,7 +1340,7 @@ export default function PulseChat() {
               )}
 
               <div className="sb-list">
-                {contacts.map(c => {
+                {filteredContacts.map(c => {
                   const label = contactLabel(c);
                   return (
                     <button
@@ -1131,9 +1410,11 @@ export default function PulseChat() {
                 </div>
               )}
               <div className="sb-list">
-                {groups.map(g => (
+                {filteredGroups.map(g => (
                   <button key={g.id} onClick={() => openChat({ type: "group", id: g.id, name: g.name })} className={`sb-item ${activeChat?.id === g.id ? "sb-item--active-group" : ""}`}>
-                    <div className="sb-av sb-av--group">{g.name?.[0]?.toUpperCase() || "?"}</div>
+                    <div className="sb-av sb-av--group">
+                      {g.avatar_url ? <img src={g.avatar_url} alt="group" className="img-cover rounded-circle" /> : (g.name?.[0]?.toUpperCase() || "?")}
+                    </div>
                     <div className="sb-item-body">
                       <span className="sb-item-name">{g.name}</span>
                       <span className="sb-item-status">{g.members.length} members</span>
@@ -1164,20 +1445,20 @@ export default function PulseChat() {
                     </button>
 
                     <div
-                      className={`hdr-av ${activeChat.type === "group" ? "hdr-av--group" : "hdr-av--dm"} ${activeChat.type === "user" ? "cursor-pointer pointer-relative" : "default-relative"}`}
-                      onClick={() => activeChat.type === "user" && setShowContactProfile(true)}
-                      title={activeChat.type === "user" ? "View profile" : undefined}
+                      className={`hdr-av ${activeChat.type === "group" ? "hdr-av--group" : "hdr-av--dm"} cursor-pointer pointer-relative`}
+                      onClick={() => activeChat.type === "user" ? setShowContactProfile(true) : setShowGroupProfile(true)}
+                      title="View profile"
                     >
                       {activeChat.type === "user" && contacts.find(c => c.phone_number === activeChat.id)?.avatar_url ? (
                         <img src={contacts.find(c => c.phone_number === activeChat.id)!.avatar_url!} alt="avatar" className="img-cover rounded-circle" />
+                      ) : activeChat.type === "group" && groups.find(g => g.id === activeChat.id)?.avatar_url ? (
+                        <img src={groups.find(g => g.id === activeChat.id)!.avatar_url!} alt="group" className="img-cover rounded-circle" />
                       ) : (
                         activeChat.name?.[0]?.toUpperCase() || "?"
                       )}
-                      {activeChat.type === "user" && (
-                        <div className="hdr-av-overlay">
-                          view
-                        </div>
-                      )}
+                      <div className="hdr-av-overlay">
+                        view
+                      </div>
                     </div>
 
                     <div className="hdr-info">
@@ -1228,7 +1509,7 @@ export default function PulseChat() {
                   </div>
 
                   <div className="hdr-right">
-                    {activeChat.type === "user" && (
+                    {(activeChat.type === "user" || activeChat.type === "group") && (
                       <>
                         <button onClick={() => startCall(false)} className="tool-btn call-hdr-btn" title="Voice Call">
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 014.69 12a19.79 19.79 0 01-3.07-8.67A2 2 0 013.6 1.37h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L7.91 9a16 16 0 006.09 6.09l1.97-1.85a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7a2 2 0 011.72 2.03z" /></svg>
@@ -1298,7 +1579,10 @@ export default function PulseChat() {
                     item.type === "divider" ? (
                       <div key={`div-${item.label}-${idx}`} className="date-sep"><span>{item.label}</span></div>
                     ) : (
-                      <div key={item.id} className={`msg-row ${item.user === currentUser ? "msg-mine" : "msg-theirs"}`}>
+                      <div
+                        key={item.id}
+                        className={`msg-row ${item.user === currentUser ? "msg-mine" : "msg-theirs"}`}
+                      >
                         {item.is_deleted ? (
                           <div className="msg-deleted">Message deleted</div>
                         ) : editingId === item.id ? (
@@ -1308,9 +1592,24 @@ export default function PulseChat() {
                             <button onClick={() => setEditingId(null)} className="edit-discard">✕</button>
                           </div>
                         ) : (
-                          <div className="bw">
+                          <div
+                            className="bw relative-bw"
+                            onTouchStart={(e) => handleTouchStart(e, item.id)}
+                            onTouchEnd={handleTouchEnd}
+                            onTouchMove={handleTouchEnd}
+                          >
                             {activeChat.type === "group" && item.user !== currentUser && <span className="sender-name">{item.user}</span>}
                             <div className={`bubble ${item.user === currentUser ? "mine" : "theirs"}`}>
+
+                              {/* Quoted Message / Reply Content */}
+                              {item.reply_to_content && (
+                                <div className="quoted-message" onClick={() => {
+                                  // Optional: Add logic to scroll to original message if needed
+                                }}>
+                                  <div className="quoted-text">{item.reply_to_content}</div>
+                                </div>
+                              )}
+
                               {item.content.startsWith("[IMAGE]") ? (
                                 <img src={item.content.replace("[IMAGE]", "")} alt="attachment" className="msg-img msg-img-media" onClick={() => setViewFile({ url: item.content.replace("[IMAGE]", ""), type: "image" })} />
                               ) : item.content.startsWith("[AUDIO]") ? (
@@ -1330,21 +1629,55 @@ export default function PulseChat() {
                               <div className="msg-footer">
                                 <span className="msg-ts">{formatTime(item.timestamp)}</span>
                                 {item.edited_at && <span className="msg-edited">edited</span>}
-                                {item.user === currentUser && activeChat.type === "user" && (
+                                {item.user === currentUser && (
                                   <span className={`ticks ${item.is_read ? "ticks--read" : ""}`}>
-                                    {item.is_read ? (
-                                      <svg width="14" height="9" viewBox="0 0 22 14" fill="none"><path d="M1 7L6 12L15 1" stroke="currentColor" strokeWidth="2" /><path d="M8 7L13 12L22 1" stroke="currentColor" strokeWidth="2" /></svg>
+                                    {activeChat.type === "user" ? (
+                                      item.is_read ? (
+                                        <svg width="14" height="9" viewBox="0 0 22 14" fill="none"><path d="M1 7L6 12L15 1" stroke="currentColor" strokeWidth="2" /><path d="M8 7L13 12L22 1" stroke="currentColor" strokeWidth="2" /></svg>
+                                      ) : (
+                                        <svg width="10" height="9" viewBox="0 0 14 14" fill="none"><path d="M1 7L6 12L13 1" stroke="currentColor" strokeWidth="2" /></svg>
+                                      )
                                     ) : (
-                                      <svg width="10" height="9" viewBox="0 0 14 14" fill="none"><path d="M1 7L6 12L13 1" stroke="currentColor" strokeWidth="2" /></svg>
+                                      // Group Read Receipts
+                                      item.read_by && item.read_by.length > 0 && (
+                                        <span className="read-by-tooltip" title={`Read by:\n${item.read_by.join('\n')}`}>
+                                          👁 {item.read_by.length}
+                                        </span>
+                                      )
                                     )}
                                   </span>
                                 )}
                               </div>
 
-                              {item.user === currentUser && (
-                                <div className="bubble-actions">
-                                  <button onClick={(e) => { e.stopPropagation(); setEditingId(item.id); setEditingText(item.content); }} title="Edit">✎</button>
-                                  <button onClick={(e) => { e.stopPropagation(); deleteMsg(item.id); }} className="del-action" title="Delete">🗑</button>
+                              {/* Reactions Rendering */}
+                              {item.reactions && Object.keys(item.reactions).length > 0 && (
+                                <div className="reactions-row">
+                                  {Object.entries(item.reactions).map(([emoji, users]) => (
+                                    <span key={emoji} className={`reaction-pill ${users.includes(currentUser) ? 'user-reacted' : ''}`} title={users.join(', ')}>
+                                      {emoji} {users.length > 1 && users.length}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* Action Menu (Reply, React, Edit, Delete) */}
+                              <div className="bubble-actions">
+                                <button onClick={(e) => { e.stopPropagation(); setReactionPickerId(item.id); }} title="React">😀</button>
+                                <button onClick={(e) => { e.stopPropagation(); setReplyingTo(item); }} title="Reply">↩️</button>
+                                {item.user === currentUser && (
+                                  <>
+                                    <button onClick={(e) => { e.stopPropagation(); setEditingId(item.id); setEditingText(item.content); }} title="Edit">✎</button>
+                                    <button onClick={(e) => { e.stopPropagation(); deleteMsg(item.id); }} className="del-action" title="Delete">🗑</button>
+                                  </>
+                                )}
+                              </div>
+
+                              {/* Reaction Picker Popover */}
+                              {reactionPickerId === item.id && (
+                                <div className="reaction-picker pop">
+                                  {reactionEmojis.map(e => (
+                                    <button key={e} onClick={() => sendReaction(item.id, e)} className="reaction-btn">{e}</button>
+                                  ))}
                                 </div>
                               )}
                             </div>
@@ -1358,6 +1691,17 @@ export default function PulseChat() {
                 <div className="typing-area">
                   {isTyping && <div className="typing-pill fade"><span className="td"></span><span className="td"></span><span className="td"></span><span>{activeChat.name} is typing…</span></div>}
                 </div>
+
+                {/* Replying To Banner */}
+                {replyingTo && (
+                  <div className="reply-banner">
+                    <div className="reply-banner-content">
+                      <strong>Replying to {replyingTo.user === currentUser ? "yourself" : replyingTo.user}</strong>
+                      <div className="reply-banner-text text-truncate">{replyingTo.content}</div>
+                    </div>
+                    <button onClick={() => setReplyingTo(null)} className="reply-cancel-btn">✕</button>
+                  </div>
+                )}
 
                 {showEmojis && (
                   <div className="emoji-picker pop">
@@ -1393,7 +1737,9 @@ export default function PulseChat() {
               <button className="cp-close-btn" onClick={() => setShowContactProfile(false)}>✕</button>
 
               <div className="cp-hero">
-                <div className="cp-avatar">
+                <div className="cp-avatar cursor-pointer" onClick={() => {
+                  if (avatarUrl) setViewFile({ url: avatarUrl, type: "avatar-circle" });
+                }}>
                   {avatarUrl ? (
                     <img src={avatarUrl} alt="Profile" className="img-cover" />
                   ) : initials}
@@ -1466,6 +1812,99 @@ export default function PulseChat() {
         );
       })()}
 
+      {showGroupProfile && activeChat?.type === "group" && (() => {
+        const g = groups.find(g => g.id === activeChat.id);
+        if (!g) return null;
+        const avatarUrl = g.avatar_url;
+        const initials = g.name?.[0]?.toUpperCase() || "?";
+
+        const myMemberData = g.members.find(m => getPhone(m) === currentUser);
+        const isCurrentUserAdmin = getIsAdmin(myMemberData) || g.members.length <= 1;
+
+        return (
+          <div className="file-viewer-overlay cp-backdrop" onClick={() => setShowGroupProfile(false)}>
+            <div className="cp-modal" onClick={e => e.stopPropagation()}>
+              <button className="cp-close-btn" onClick={() => setShowGroupProfile(false)}>✕</button>
+
+              <div className="cp-hero">
+                <div className="cp-avatar cursor-pointer" onClick={() => {
+                  if (avatarUrl) setViewFile({ url: avatarUrl, type: "avatar-circle" });
+                }}>
+                  {avatarUrl ? <img src={avatarUrl} alt="Group" className="img-cover" /> : initials}
+                </div>
+
+                {isCurrentUserAdmin ? (
+                  <div className="group-avatar-actions">
+                    <input type="file" ref={groupAvatarInputRef} accept="image/*" className="hidden-input" onChange={handleGroupAvatarUpload} />
+                    <button className="avatar-upload-btn btn-sm-margin" disabled={isUploadingGroupAvatar} onClick={() => groupAvatarInputRef.current?.click()}>
+                      {isUploadingGroupAvatar ? "Uploading..." : "📷 Change Group Picture"}
+                    </button>
+                  </div>
+                ) : (
+                  <p className="admin-only-notice">Admin permissions required to edit</p>
+                )}
+
+                <div className="cp-name-wrap">
+                  <div className="cp-name">{g.name}</div>
+                  <div className="cp-sub">{g.members.length} members</div>
+                </div>
+              </div>
+
+              <div className="cp-body">
+                <div className="cp-row-col">
+                  <div className="cp-row-label">Members</div>
+                  <div className="group-members-list">
+                    {g.members.map((mRaw, idx) => {
+                      const mPhone = getPhone(mRaw);
+                      const isAdm = getIsAdmin(mRaw);
+                      const c = contacts.find(contact => contact.phone_number === mPhone);
+                      const label = c ? contactLabel(c) : mPhone;
+                      return (
+                        <div key={`${mPhone}-${idx}`} className="group-member-item">
+                          <div className="gm-avatar">
+                            {c?.avatar_url ? <img src={c.avatar_url} className="img-cover rounded-circle" alt="avatar" /> : label?.[0]?.toUpperCase() || "?"}
+                          </div>
+                          <div className="gm-info">
+                            <div className="gm-name">
+                              {label} {mPhone === currentUser ? "(You)" : ""}
+                              {isAdm && <span className="admin-badge">Admin</span>}
+                            </div>
+                            <div className="gm-phone">{mPhone}</div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {isCurrentUserAdmin && (
+                  <div className="cp-row cp-row-between mt-add-member">
+                    <input
+                      value={newGroupMemberPhone}
+                      onChange={e => setNewGroupMemberPhone(e.target.value)}
+                      placeholder="Add phone number..."
+                      className="sb-field m-0 flex-grow"
+                    />
+                    <button className="cp-edit-btn ms-2" onClick={addGroupMember}>Add</button>
+                  </div>
+                )}
+
+                <div className="cp-actions">
+                  <button className="cp-action-btn" onClick={() => { setShowGroupProfile(false); startCall(false); }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 014.69 12a19.79 19.79 0 01-3.07-8.67A2 2 0 013.6 1.37h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L7.91 9a16 16 0 006.09 6.09l1.97-1.85a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7a2 2 0 011.72 2.03z" /></svg>
+                    Group Voice Call
+                  </button>
+                  <button className="cp-action-btn primary" onClick={() => { setShowGroupProfile(false); startCall(true); }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+                    Group Video Call
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {showCallLogUI && (
         <div className="file-viewer-overlay" onClick={() => setShowCallLogUI(false)}>
           <div className="viewer-content cl-modal" onClick={e => e.stopPropagation()}>
@@ -1510,8 +1949,22 @@ export default function PulseChat() {
         <div className="call-overlay">
           <div className={`call-modal ${isVideoCall && callState === "connected" ? "video-active" : ""}`}>
             <div className={`video-container ${(isVideoCall && (callState === "connected" || callState === "calling")) ? "d-block" : "d-none"}`}>
-              <video ref={remoteVideoRef} className="remote-video" autoPlay playsInline></video>
+              {Object.keys(remoteStreams).length > 0 ? (
+                Object.entries(remoteStreams).map(([peerId, stream]) => (
+                  <video
+                    key={peerId}
+                    className="remote-video"
+                    autoPlay
+                    playsInline
+                    ref={node => { if (node && node.srcObject !== stream) node.srcObject = stream; }}
+                  ></video>
+                ))
+              ) : (
+                <video ref={remoteVideoRef} className="remote-video" autoPlay playsInline></video>
+              )}
+
               <video ref={localVideoRef} className="local-video" autoPlay playsInline muted></video>
+
               {callState === "connected" && (
                 <div className="video-duration-overlay">
                   {formatCallDuration(callDuration)}
@@ -1589,6 +2042,13 @@ export default function PulseChat() {
           <div className="viewer-content" onClick={e => e.stopPropagation()}>
             {viewFile.type === "image" && <img src={viewFile.url} alt="attachment" />}
             {viewFile.type === "video" && <video src={viewFile.url} controls autoPlay />}
+            {viewFile.type === "avatar-circle" && (
+              <img
+                src={viewFile.url}
+                alt="Avatar Fullscreen"
+                className="viewer-avatar-circle fullscreen-avatar img-cover rounded-circle"
+              />
+            )}
           </div>
         </div>
       )}
