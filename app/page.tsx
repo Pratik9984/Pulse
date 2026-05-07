@@ -1289,7 +1289,7 @@ export default function PulseChat() {
                       <button
                         key={`${m.chatId}-${m.id}`}
                         className="sb-item"
-                        onClick={() => openChat({ type: m.chatType, id: m.chatId, name: chatName || String(m.chatId) })}
+                        onClick={() => openChat({ type: m.chatType, id: String(m.chatId), name: chatName || String(m.chatId) })}
                       >
                         <div className="sb-item-body mw-0">
                           <span className="sb-item-name name-row">{chatName}</span>
