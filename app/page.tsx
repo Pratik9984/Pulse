@@ -1281,15 +1281,19 @@ export default function PulseChat() {
                 </div>
                 <div className="sb-list">
                   {searchMessageResults.map(m => {
-                    const groupName = groups.find(g => String(g.id) === m.chatId)?.name;
-                    const c = contacts.find(contact => contact.phone_number === m.chatId);
+                    const groupName = groups.find(g => String(g.id) === String(m.chatId))?.name;
+                    const c = contacts.find(contact => String(contact.phone_number) === String(m.chatId));
                     const chatName = m.chatType === "group" ? groupName : (c ? contactLabel(c) : m.chatId);
 
                     return (
                       <button
                         key={`${m.chatId}-${m.id}`}
                         className="sb-item"
-                        onClick={() => openChat({ type: m.chatType, id: String(m.chatId), name: chatName || String(m.chatId) })}
+                        onClick={() => openChat({
+                          type: m.chatType,
+                          id: String(m.chatId), // Fixed here
+                          name: chatName || String(m.chatId)
+                        })}
                       >
                         <div className="sb-item-body mw-0">
                           <span className="sb-item-name name-row">{chatName}</span>
