@@ -93,7 +93,7 @@ export default function PulseChat() {
   const [editingText, setEditingText] = useState("");
   const [typingSet, setTypingSet] = useState<Set<string>>(new Set());
 
-  // New Quality of Life States
+  // Quality of Life States
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [reactionPickerId, setReactionPickerId] = useState<string | number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -1291,12 +1291,12 @@ export default function PulseChat() {
                         className="sb-item"
                         onClick={() => openChat({
                           type: m.chatType,
-                          id: String(m.chatId), // Fixed here
-                          name: chatName || String(m.chatId)
+                          id: String(m.chatId),
+                          name: String(chatName || m.chatId)
                         })}
                       >
                         <div className="sb-item-body mw-0">
-                          <span className="sb-item-name name-row">{chatName}</span>
+                          <span className="sb-item-name name-row">{String(chatName || m.chatId)}</span>
                           <span className="sb-item-status text-truncate">{m.content}</span>
                         </div>
                       </button>
