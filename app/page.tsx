@@ -1346,24 +1346,7 @@ export default function PulseChat() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]); // loadProfile etc are stable now, so this fires only when token changes
 
-  // Capacitor resume reconnect
-  useEffect(() => {
-    if (!token) return;
-    let removeListener: (() => void) | null = null;
-    (async () => {
-      try {
-        const { Capacitor } = await import("@capacitor/core");
-        if (Capacitor.isNativePlatform()) {
-          const { App } = await import("@capacitor/app");
-          const handle = await App.addListener("appStateChange", ({ isActive }) => {
-            if (isActive) initWSRef.current?.();
-          });
-          removeListener = () => handle.remove();
-        }
-      } catch { }
-    })();
-    return () => removeListener?.();
-  }, [token]);
+  
 
   // ─── MESSAGES ────────────────────────────────────────────────────────────────
   const sendMessage = async () => {
